@@ -29,3 +29,14 @@
 ## Survivor Perks: 600,000 - 699,999
 
 TODO split perks between generic & character
+
+PLANNED (Felix):
+
+## Killer Perks: 500,000 - 599,999
+- generic: 500,000 - 500,999
+- trapper: 501,000 - 501,009
+- etc. (10 per killer)
+## Survivor Perks: 600,000 - 699,999
+- generic: 500,000 - 500,999
+- dwight: 601,000 - 601,009
+- etc. (10 per survivor)
