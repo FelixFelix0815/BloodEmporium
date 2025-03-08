@@ -1,6 +1,7 @@
 # Tables
 
 ## unlockables Table
+### Old:
 | id        | name     | category                                | rarity   | notes                                 | type                            | order    |
 |-----------|----------|-----------------------------------------|----------|---------------------------------------|---------------------------------|----------|
 | _string_  | _string_ | _string_                                | _string_ | _string_                              | _string_                        | _int_    |
@@ -11,7 +12,7 @@
 |           |          | survivor/killer_name[¹] for Add-ons     |          |                                       | add-on                          |          |
 |           |          | survivor for Items                      |          |                                       | item                            |          |
 
-### Planned:
+### New:
 | id        | name     | category                                                  | rarity   | notes                                 | type                            | order    |
 |-----------|----------|-----------------------------------------------------------|----------|---------------------------------------|---------------------------------|----------|
 | _string_  | _string_ | _string_                                                  | _string_ | _string_                              | _string_                        | _int_    |
@@ -31,7 +32,7 @@
 
 [¹]: #killers-table
 
-## survivors Table (TODO)
+## survivors Table
 
 | id[²]     | alias      | name      |
 |-----------|------------|-----------|
