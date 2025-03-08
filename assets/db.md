@@ -23,7 +23,7 @@
 |           |          | survivor for Items                                        |          |                                       | item                            |          |
 
 ## killers Table
-| id        | alias[¹]   | name      |
+| id[¹]     | alias      | name      |
 |-----------|------------|-----------|
 | _string_  | _string_   | _string_  |
 |           |            |           |
@@ -33,7 +33,7 @@
 
 ## survivors Table (TODO)
 
-| id        | alias[²]   | name      |
+| id[²]     | alias      | name      |
 |-----------|------------|-----------|
 | _string_  | _string_   | _string_  |
 |           |            |           |
