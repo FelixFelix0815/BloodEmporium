@@ -49,16 +49,22 @@ class FilterOptionsCollapsibleBox(CollapsibleBox):
                                            QSize(125, 35))
         self.killersFiltersButton.clicked.connect(self.filter_killers)
 
+        self.survivorsFiltersButton = Button(self.filters, "preferencesPageSurvivorsFiltersButton", "Select All Survivors",
+                                           QSize(125, 35))
+        self.survivorsFiltersButton.clicked.connect(self.filter_survivors)
+
         self.filterButtonsRowLayout.addWidget(self.clearFiltersButton)
         self.filterButtonsRowLayout.addWidget(self.killersFiltersButton)
+        self.filterButtonsRowLayout.addWidget(self.survivorsFiltersButton)
         self.filterButtonsRowLayout.addStretch(1)
         self.filtersLayout.addWidget(self.filterButtonsRow, 0, 0, 2, 10)
         # 10 is bandaid; should really fix filtersLayout to have 0 horizontal spacing and add gap between boxes and txt
 
         # character
-        self.num_per_row = 10
+        self.num_per_row = 15
         categories = Data.get_categories(True)
         killer_aliases = Data.get_killer_alias()
+        survivor_aliases = Data.get_survivor_alias()
         num_character_columns = math.ceil(len(categories) / self.num_per_row) * 2 + 1 # extra 1 for a gap
         self.characterHeading = TextLabel(self.filters, "characterHeading", "Character")
         self.filtersLayout.addWidget(self.characterHeading, 2, 0, 1, num_character_columns)
@@ -72,7 +78,8 @@ class FilterOptionsCollapsibleBox(CollapsibleBox):
             self.filtersLayout.addWidget(checkbox, (i % self.num_per_row + 3), (i // self.num_per_row) * 2, 1, 1)
 
             label = TextLabel(self.filters, f"{TextUtil.camel_case(character)}CharacterFilterLabel",
-                              killer_aliases.get(character, TextUtil.title_case(character)))
+                              survivor_aliases.get(character, killer_aliases.get(character,
+                                                                                 TextUtil.title_case(character))))
             self.filtersLayout.addWidget(label, (i % self.num_per_row + 3), (i // self.num_per_row) * 2 + 1, 1, 1)
 
         # rarity
@@ -148,6 +155,14 @@ class FilterOptionsCollapsibleBox(CollapsibleBox):
                 checkbox.setChecked(True)
         self.on_click()
 
+    def filter_survivors(self):
+        survivors = [survivor_id for survivor_id, _, _ in Data.get_survivors(False)]
+        for character, checkbox in self.characterCheckBoxes.items():
+            if character in survivors:
+                checkbox.setChecked(True)
+        self.on_click()
+
+
 class UnlockableWidget(QWidget):
     def __init__(self, parent, unlockable: Unlockable, tier, subtier, on_unlockable_select):
         name = TextUtil.camel_case(unlockable.name)
@@ -164,12 +179,15 @@ class UnlockableWidget(QWidget):
         self.layout.addWidget(self.checkBox)
 
         killer_names = Data.get_killer_full_name(True)
+        survivor_names = Data.get_survivor_full_name()
         self.image = QLabel(self)
         self.image.setObjectName(f"{name}Image")
         self.image.setFixedSize(QSize(75, 75))
         self.refresh_icon()
         self.image.setScaledContents(True)
-        self.image.setToolTip(f"""Character: {killer_names.get(unlockable.category, TextUtil.title_case(unlockable.category))}
+        self.image.setToolTip(f"""Character: {survivor_names.get(unlockable.category, 
+                                                                 killer_names.get(unlockable.category, 
+                                                                 TextUtil.title_case(unlockable.category)))}
 Rarity: {TextUtil.title_case(unlockable.rarity)}
 Type: {TextUtil.title_case(unlockable.type)}""")
         self.layout.addWidget(self.image)

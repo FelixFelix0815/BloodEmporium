@@ -42,6 +42,9 @@ class Data:
     __cursor.execute("SELECT id, alias, name FROM killers")
     __killers_rows = __cursor.fetchall()
 
+    __cursor.execute("SELECT id, alias, name FROM survivors")
+    __survivors_rows = __cursor.fetchall()
+
     __connection.close()
     print("disconnected from database")
 
@@ -129,16 +132,30 @@ class Data:
         return sorted(Data.__killers_rows, key=lambda row: row[1]) if sort else Data.__killers_rows
 
     @staticmethod
+    def get_survivors(sort):
+        # sort by alias
+        return sorted(Data.__survivors_rows, key=lambda row: row[1]) if sort else Data.__survivors_rows
+
+    @staticmethod
     def get_killer_alias():
         return {killer_id: f"{alias}" for killer_id, alias, name in Data.__killers_rows}
+
+    @staticmethod
+    def get_survivor_alias():
+        return {survivor_id: f"{alias}" for survivor_id, alias, name in Data.__survivors_rows}
 
     @staticmethod
     def get_killer_full_name(include_the=False):
         return {killer_id: f"{'The ' if include_the else ''}{alias} ({name})" for killer_id, alias, name in Data.__killers_rows}
 
     @staticmethod
+    def get_survivor_full_name():
+        return {survivor_id: f"{name}" for survivor_id, alias, name in
+                Data.__survivors_rows}
+
+    @staticmethod
     def get_categories(sort):
-        return ["universal", "survivor", "killer"] + [killer_id for killer_id, _, _ in Data.get_killers(sort)]
+        return ["universal", "survivor", "killer"] + [killer_id for killer_id, _, _ in Data.get_killers(sort)] + [survivor_id for survivor_id, _, _ in Data.get_survivors(sort)]
 
     @staticmethod
     def get_characters(sort):
@@ -176,12 +193,15 @@ class Data:
 
         sorted_widgets = unlockable_widgets.copy()
         killer_aliases = Data.get_killer_alias()
+        survivor_aliases = Data.get_survivor_alias()
         if sort_by == "default":
             sorted_widgets.sort(key=lambda widget: widget.unlockable.order)
         elif sort_by == "name":
             sorted_widgets.sort(key=lambda widget: widget.unlockable.name.replace("\"", ""))
         elif sort_by == "character":
-            sorted_widgets.sort(key=lambda widget: killer_aliases.get(widget.unlockable.category, widget.unlockable.category))
+            sorted_widgets.sort(key=lambda widget: survivor_aliases.get(widget.unlockable.category,
+                                                                        killer_aliases.get(widget.unlockable.category,
+                                                                                           widget.unlockable.category)))
         elif sort_by == "rarity":
             rarities_enum = {"common": 1, "uncommon": 2, "rare": 3, "very_rare": 4,
                              "ultra_rare": 5, "event": 6, "varies": 7}
