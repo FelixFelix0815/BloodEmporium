@@ -13,3 +13,4 @@ supervision==0.1.0
 torch~=1.13.1
 ultralytics==8.0.33
 pillow==9.2.0
+PyScreeze==0.1.28
