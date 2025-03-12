@@ -220,7 +220,7 @@ class StateProcess(Process):
             # initialisation: merged base for template matching
             print(f"initialising ({State.version})")
             print(f"merging")
-            unlockables = Data.get_unlockables()
+            unlockables = Data.get_unlockables_legacy()
             num_custom = len([u for u in unlockables if u.is_custom_icon])
             print(f"using {num_custom} custom icons and {len(unlockables) - num_custom} vanilla icons")
             print(f"using profile: {profile_id} (bundled: {bundled}) for character {character}")

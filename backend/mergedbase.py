@@ -25,7 +25,7 @@ class MergedBase:
         if retired:
             categories.append("retired")
 
-        unlockables = [unlockable for unlockable in Data.get_unlockables() if unlockable.category in categories]
+        unlockables = [unlockable for unlockable in Data.get_unlockables_legacy() if unlockable.category in categories]
 
         self.size = 64
         self.names, self.valid_images = self.__get_valid_images(unlockables)

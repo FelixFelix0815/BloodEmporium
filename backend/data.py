@@ -127,6 +127,58 @@ class Data:
         return unlockables
 
     @staticmethod
+    def get_unlockables_legacy():
+        all_files = [(subdir, file) for subdir, dirs, files in os.walk(Config().path()) for file in files]
+        unlockables = []
+        for row in Data.__unlockables_rows:
+            u_id, u_name, u_category, u_rarity, u_notes, u_type, u_order = row
+
+            # search in user's folder
+            u_image_path = None
+            u_is_custom_icon = None
+            for subdir, file in all_files:
+                if u_id.lower() in file.lower():  # in case pack has recapitalised files
+                    # bubba and hillbilly share an addon with the same name
+                    # if u_category == "bubba" and u_id == "iconAddon_chainsBloody" and "Xipre" in subdir:
+                    #     continue
+                    # elif u_category == "hillbilly" and u_id == "iconAddon_chainsBloody" and "Xipre" not in subdir:
+                    #     continue
+
+                    u_image_path = os.path.normpath(os.path.join(subdir, file))
+                    u_is_custom_icon = True
+                    break
+
+            # search in asset folder
+            if u_image_path is None:
+                asset_path = Path.assets_file(u_category, u_id)
+                if os.path.isfile(asset_path):
+                    u_image_path = os.path.normpath(os.path.abspath(asset_path))
+                    u_is_custom_icon = False
+                else:
+                    print(f"no source found for desired unlockable: {u_id} under category: {u_category}")
+                    continue
+
+            if u_image_path is not None:
+                unlockables.append(
+                    Data.unlockable_to_legacy(Unlockable(u_id, u_name, u_category, u_rarity, u_notes, u_type, u_order,
+                                                         u_image_path, u_is_custom_icon)))
+
+        return unlockables
+
+    @staticmethod
+    def unlockable_to_legacy(unlockable: Unlockable) -> Unlockable:
+        if unlockable.type != "perk":
+            return unlockable
+
+        if unlockable.category in [k_id for k_id, _, _ in Data.__killers_rows]:
+            unlockable.category = "killer"
+
+        if unlockable.category in [s_id for s_id, _, _ in Data.__survivors_rows]:
+            unlockable.category = "survivor"
+
+        return unlockable
+
+    @staticmethod
     def get_killers(sort):
         # sort by alias
         return sorted(Data.__killers_rows, key=lambda row: row[1]) if sort else Data.__killers_rows
