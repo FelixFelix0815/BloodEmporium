@@ -9,8 +9,8 @@ from shapes import LinkedEdge, MatchedNode, UnmatchedNode
 
 class Grapher:
     def __init__(self, nodes: List[MatchedNode], edges: List[LinkedEdge]):
-        self.nodes = nodes
-        self.edges = edges
+        self.nodes: List[MatchedNode] = nodes
+        self.edges: List[LinkedEdge] = edges
 
     def create(self):
         nodes = []
@@ -75,4 +75,18 @@ class Grapher:
             return True # unlikely to be more than 1 mismatch
 
         # no accessible nodes
-        return not any([data["cls_name"] == NodeType.ACCESSIBLE for data in base_bloodweb.nodes.values()])
+        return not any([data["cls_name"] in NodeType.MULTI_UNCLAIMED for data in base_bloodweb.nodes.values()])
+
+    @staticmethod
+    def update_guess(base_bloodweb, nodes: List[GraphNode]) -> None:
+        neighbors = set()
+        for node in nodes:
+            node.set_claimed(True)
+            nx.set_node_attributes(base_bloodweb, node.get_dict())
+
+            for neighbor in base_bloodweb.neighbors(node.node_id):
+                neighbors.add(base_bloodweb.nodes[neighbor]["node_id"])
+
+        for neighbor_id in neighbors:
+            if base_bloodweb.nodes[neighbor_id]["cls_name"] == NodeType.INACCESSIBLE:
+                nx.set_node_attributes(base_bloodweb, GraphNode.from_dict(base_bloodweb.nodes[neighbor_id], cls_name=NodeType.ACCESSIBLE).get_dict())
