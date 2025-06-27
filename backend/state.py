@@ -120,18 +120,10 @@ class StateProcess(Process):
         if time_since_grab < wait_time:
             time.sleep(wait_time - time_since_grab)
 
-    def wait_level_cleared(self, num_nodes):
+    def wait_level_cleared(self):
         time.sleep(1) # 1 sec to clear out until new level screen
         self.click()
 
-        # dont think this is necessary, all this just for one check at p0 seems like a waste of time in the long run
-        # lvl 2 has 4 nodes, lvl 5 has 5 nodes, lvl 10 has 9 nodes
-        # if num_nodes == 4 or 5 or 9:
-        #     time.sleep(0.5) # in case of extra information on early level (e.g. lvl 2, 5, 10)
-        #     self.click()
-        #     if num_nodes == 9:
-        #         time.sleep(0.5) # in case of yet more extra information on early level (e.g. lvl 10)
-        #         self.click()
         time.sleep(StateProcess.LEVEL_GEN_TIME)
 
     def click_node(self):
@@ -182,14 +174,6 @@ class StateProcess(Process):
         timing_nodes = min(num_nodes, 6) + max(num_nodes - 6, 0) * 0.5
         time.sleep(2.5 + timing_nodes * StateProcess.AUTO_PURCHASE_NODE_TIME)
 
-        # dont think this is necessary, all this just for one check at p0 seems like a waste of time in the long run
-        # lvl 2 has 4 nodes, lvl 5 has 5 nodes, lvl 10 has 9 nodes - see fast.txt
-        # if num_nodes == 4 or 5 or 9:
-        #     time.sleep(0.5) # in case of extra information on early level (e.g. lvl 2, 5, 10)
-        #     self.click()
-        #     if num_nodes == 9:
-        #         time.sleep(0.5) # in case of yet more extra information on early level (e.g. lvl 10)
-        #         self.click()
         self.move_to(1, 1)
         time.sleep(StateProcess.LEVEL_GEN_TIME)
 
@@ -311,8 +295,9 @@ class StateProcess(Process):
             print(f"initialising ({State.version})")
             print(f"merging")
             unlockables = Data.get_unlockables_legacy()
-            num_custom = len([u for u in unlockables if u.is_custom_icon])
-            print(f"using {num_custom} custom icons and {len(unlockables) - num_custom} vanilla icons")
+            are_custom_icons = [is_custom_icon for u in unlockables for is_custom_icon in u.are_custom_icons]
+            num_custom = len([is_custom_icon for is_custom_icon in are_custom_icons if is_custom_icon])
+            print(f"using {num_custom} custom icons and {len(are_custom_icons) - num_custom} vanilla icons")
             print(f"----------RUNTIME INFO----------")
             print(f"profile        | {profile_id}")
             print(f"    bundled    | {bundled}")
@@ -331,480 +316,274 @@ class StateProcess(Process):
 
             bloodweb_iteration = 0
             # initial_bp_balance = 0
-            if run_mode == "naive":
-                while True:
-                    if self.prestige_limit is not None and self.prestige_total == self.prestige_limit:
-                        print("reached prestige limit. terminating")
+            edge_detector = EdgeDetection()
+            while True:
+                if self.prestige_limit is not None and self.prestige_total == self.prestige_limit:
+                    print("reached prestige limit. terminating")
+                    self.emit("terminate")
+                    self.emit("toggle_text", ("Prestige limit reached.", False, False))
+                    return
+
+                # screen capture
+                print("capturing screen")
+                cv_img = CVImage.screen_capture()
+                image_gray = cv_img.get_gray()
+                debugger.set_image(bloodweb_iteration, cv_img)
+
+                # yolov8: detect and match all nodes
+                print("yolov8: detect and match all nodes")
+                node_results = node_detector.predict(cv_img.get_bgr())
+                all_nodes, bp_node = node_detector.get_validate_all_nodes(node_results)
+                matched_nodes = node_detector.match_nodes(all_nodes, image_gray, merged_base)
+                debugger.set_nodes(bloodweb_iteration, matched_nodes)
+
+                # nothing detected
+                if len(matched_nodes) == 0 or \
+                        (len(matched_nodes) == 1 and matched_nodes[0].cls_name in NodeType.MULTI_ORIGIN):
+                    print("nothing detected, trying again...")
+                    if debug_mode:
+                        debugger.construct_and_show_images(bloodweb_iteration)
+                    time.sleep(StateProcess.RETRY_TIME) # try again
+                    self.click()
+                    continue
+
+                # current_bp_balance = node_detector.calculate_bloodpoints(bp_node, image_gray)
+                # if bloodweb_iteration == 0:
+                #     initial_bp_balance = current_bp_balance
+                # self.bp_total = initial_bp_balance - current_bp_balance
+                # self.emit("bloodpoint", (self.bp_total, self.bp_limit))
+
+                prestige = [node for node in matched_nodes if node.cls_name == NodeType.PRESTIGE]
+                origin_auto_enabled = [node for node in matched_nodes
+                                       if node.cls_name == NodeType.ORIGIN_AUTO_ENABLED]
+
+                # fast-forward levels with <= 6 nodes (excl. origin): autobuy if possible
+                num_actual_nodes = len([node for node in matched_nodes if node.cls_name not in NodeType.MULTI_ORIGIN])
+                fast_forward = num_actual_nodes <= 6
+                ignore_slow = False
+
+                # prestige
+                if len(prestige) > 0:
+                    self.prestige_total += 1
+                    if debug_mode:
+                        debugger.construct_and_show_images(bloodweb_iteration)
+                    if self.bp_limit is not None and self.bp_total + 20000 > self.bp_limit:
+                        print("prestige level: reached bloodpoint limit. terminating")
                         self.emit("terminate")
-                        self.emit("toggle_text", ("Prestige limit reached.", False, False))
+                        self.emit("toggle_text", ("Bloodpoint limit reached.", False, False))
                         return
+                    # if 20000 > current_bp_balance:
+                    #     print("prestige level: bloodpoints depleted. terminating")
+                    #     self.emit("terminate")
+                    #     self.emit("toggle_text", ("Bloodpoints depleted.", False, False))
+                    #     return
 
-                    # screen capture
-                    print("capturing screen")
-                    cv_img = CVImage.screen_capture()
-                    image_gray = cv_img.get_gray()
-                    debugger.set_image(bloodweb_iteration, cv_img)
-
-                    # yolov8: detect claimable nodes
-                    print("yolov8: detect claimable nodes")
-                    results = node_detector.predict(cv_img.get_bgr())
-                    all_nodes, bp_node = node_detector.get_validate_all_nodes(results)
-
-                    # TODO only match if necessary eg bp balance is much lower than limit
-                    #  (use iri cost * number of unclaimed nodes)
-                    matched_nodes = node_detector.match_nodes(all_nodes, image_gray, merged_base)
-                    matched_claimable_nodes = [node for node in matched_nodes
-                                               if node.cls_name in NodeType.MULTI_CLAIMABLE]
-                    debugger.set_nodes(bloodweb_iteration, matched_nodes)
-
-                    # nothing detected
-                    if len(matched_claimable_nodes) == 0 or \
-                            (len(matched_claimable_nodes) == 1 and
-                             matched_claimable_nodes[0].cls_name in NodeType.MULTI_ORIGIN):
-                        print("nothing detected, trying again...")
-                        if debug_mode:
-                            debugger.construct_and_show_images(bloodweb_iteration)
-                        time.sleep(StateProcess.RETRY_TIME) # try again
-                        self.click()
-                        continue
-
-                    # current_bp_balance = node_detector.calculate_bloodpoints(bp_node, image_gray)
-                    # if bloodweb_iteration == 0:
-                    #     initial_bp_balance = current_bp_balance
-                    # self.bp_total = initial_bp_balance - current_bp_balance
-                    # self.emit("bloodpoint", (self.bp_total, self.bp_limit))
-
+                    print("prestige level: selecting")
+                    self.bp_total += 20000
+                    self.emit("prestige", (self.prestige_total, self.prestige_limit))
+                    self.emit("bloodpoint", (self.bp_total, self.bp_limit))
+                    centre = matched_nodes[0].box.centre()
+                    self.move_to(*centre.xy())
+                    self.click_prestige()
+                    bloodweb_iteration += 1
+                    continue
+                elif fast_forward and len(origin_auto_enabled) > 0:
+                    # enabled auto origin found
                     total_bloodweb_cost = 0
                     num_unclaimed = 0
-                    for node in matched_claimable_nodes:
+                    for node in matched_nodes:
                         if node.cls_name in NodeType.MULTI_UNCLAIMED:
                             unlockable = [u for u in unlockables if u.unique_id == node.unique_id][0]
                             total_bloodweb_cost += Data.get_cost(unlockable.rarity, unlockable.type)
                             num_unclaimed += 1
-
-                    prestige = [node for node in matched_nodes if node.cls_name == NodeType.PRESTIGE]
-                    origin_auto_enabled = [node for node in matched_nodes
-                                           if node.cls_name == NodeType.ORIGIN_AUTO_ENABLED]
-
-                    if any([node.cls_name == NodeType.ORIGIN_AUTO_DISABLED for node in matched_nodes]):
-                        # disabled auto origin found
-                        print("bloodpoints depleted. terminating")
-                        self.emit("terminate")
-                        self.emit("toggle_text", ("Bloodpoints depleted.", False, False))
-                        return
-
-                    if len(prestige) > 0:
-                        # prestige node found
-                        self.prestige_total += 1
-                        if debug_mode:
-                            debugger.construct_and_show_images(bloodweb_iteration)
-                        if self.bp_limit is not None and self.bp_total + 20000 > self.bp_limit:
-                            print("prestige level: reached bloodpoint limit. terminating")
-                            self.emit("terminate")
-                            self.emit("toggle_text", ("Bloodpoint limit reached.", False, False))
-                            return
-                        # if 20000 > current_bp_balance:
-                        #     print("prestige level: bloodpoints depleted. terminating")
-                        #     self.emit("terminate")
-                        #     self.emit("toggle_text", ("Bloodpoints depleted.", False, False))
-                        #     return
-
-                        print("prestige level: selecting")
-                        self.bp_total += 20000
-                        self.emit("prestige", (self.prestige_total, self.prestige_limit))
-                        self.emit("bloodpoint", (self.bp_total, self.bp_limit))
-
-                        centre = prestige[0].box.centre()
-                        self.move_to(*centre.xy())
-                        self.click_prestige()
-
-                        bloodweb_iteration += 1
-                        continue
-
-                    if len(origin_auto_enabled) > 0:
-                        # enabled auto origin found
-                        if debug_mode:
-                            debugger.construct_and_show_images(bloodweb_iteration)
-
-                        if self.bp_limit is not None and total_bloodweb_cost > self.bp_limit - self.bp_total:
-                            # manual
-                            pass
-                        else:
-                            print("auto origin (enabled): selecting")
-                            self.bp_total += total_bloodweb_cost
-                            self.emit("bloodpoint", (self.bp_total, self.bp_limit))
-                            centre = origin_auto_enabled[0].box.centre()
-                            self.move_to(*centre.xy())
-                            self.click_origin(num_unclaimed)
-
-                            bloodweb_iteration += 1
-                            continue
-
-                    # no auto origin found: must be prestige 0; select manually OR
-                    # auto origin found but total bloodweb cost exceeds bp limit
-
-                    # yolov5obb: detect and link all edges
-                    print("yolov5obb: detect and link all edges")
-                    edge_detector = EdgeDetection()
-                    edge_results = edge_detector.predict(cv_img.get_bgr())
-                    avg_diameter = mean([(m.box.diameter()) for m in matched_nodes])
-                    linked_edges = edge_detector.link_edges(edge_results, matched_nodes, avg_diameter)
-                    debugger.set_edges(bloodweb_iteration, linked_edges)
-
-                    # create networkx graph of nodes
-                    print("creating networkx graph")
-                    grapher = Grapher(matched_nodes, linked_edges) # all 9999
-                    base_bloodweb = grapher.create()
-                    debugger.set_base_bloodweb(bloodweb_iteration, base_bloodweb)
-
-                    print("NODES")
-                    print(TextUtil.justify(4, [[node_id, data["name"], data["cls_name"]]
-                                               for node_id, data in base_bloodweb.nodes.items()]))
-                    print("EDGES")
-                    print(TextUtil.justify(4, [[edge[0], base_bloodweb.nodes[edge[0]]["name"], edge[1],
-                                                base_bloodweb.nodes[edge[1]]["name"]] for edge in base_bloodweb.edges]))
-
                     if debug_mode:
                         debugger.construct_and_show_images(bloodweb_iteration)
 
-                    update_iteration = 0
-                    while True:
-                        optimiser = Optimiser(base_bloodweb)
-                        optimiser.dijkstra_graph = base_bloodweb
-                        debugger.set_dijkstra(bloodweb_iteration, update_iteration, optimiser.dijkstra_graph)
-
-                        # prioritise inaccessible (select more than one node) # TODO prioritise 3 nodes at once, then 2, then 1 (also factoring in BP limit)
-                        random_node = optimiser.select_random_prioritise_inaccessible()
-                        random_unlockable = [u for u in unlockables if u.unique_id == random_node.name][0]
-                        cost = Data.get_cost(random_unlockable.rarity, random_unlockable.type) # TODO need to do for entire path
-                        if self.bp_limit is not None and self.bp_total + cost > self.bp_limit:
-                            print(f"{random_node.node_id} {random_node.name}: reached bloodpoint limit. terminating")
-                            self.emit("terminate")
-                            self.emit("toggle_text", ("Bloodpoint limit reached.", False, False))
-                            return
-                        # if cost > current_bp_balance:
-                        #     print(f"{random_node.node_id} {random_node.name}: bloodpoints depleted. terminating")
-                        #     self.emit("terminate")
-                        #     self.emit("toggle_text", ("Bloodpoints depleted.", False, False))
-                        #     return
-
-                        print(random_node.name)
-                        self.bp_total += cost
+                    if self.bp_limit is not None and total_bloodweb_cost > self.bp_limit - self.bp_total:
+                        # manual: start edge detection and optimal non-auto selection but without waiting
+                        ignore_slow = True # dont need to wait the extra time that slow necessitates
+                    else:
+                        print("auto origin (enabled) from fast forward: selecting")
+                        self.bp_total += total_bloodweb_cost
                         self.emit("bloodpoint", (self.bp_total, self.bp_limit))
-
-                        # select node
-                        grab_time = time.time()
-                        self.move_to(random_node.x, random_node.y)
-                        self.click_node()
-
-                        # mystery box: click TODO may have to move outside of this branch?
-                        # if "mysteryBox" in random_node.name:
-                        #     print("mystery box selected")
-                        #     time.sleep(0.9)
-                        #     self.click()
-                        #     time.sleep(0.2)
-
-                        # wait: will claim 1 if accessible, 2 or 3 if inaccessible, so wait for 3 to be safe TODO just get the number of nodes selected
-                        self.wait(grab_time, 3 if random_node.cls_name == NodeType.INACCESSIBLE else 1, speed == "slow")
-
-                        # take new picture and update colours
-                        print("updating bloodweb")
-                        updated_img = CVImage.screen_capture()
-                        debugger.add_updated_image(bloodweb_iteration, update_iteration, updated_img)
-
-                        print("yolov8: detect claimable nodes")
-                        updated_results = node_detector.predict(updated_img.get_bgr())
-                        updated_nodes, updated_bp_node = node_detector.get_validate_all_nodes(updated_results)
-                        new_level = Grapher.update(base_bloodweb, updated_nodes, random_node)
-                        # current_bp_balance = node_detector.calculate_bloodpoints(updated_bp_node,
-                        #                                                          updated_img.get_gray())
-                        # self.bp_total = initial_bp_balance - current_bp_balance
-                        # self.emit("bloodpoint", (self.bp_total, self.bp_limit))
-
-                        # new level
-                        if new_level:
-                            print("level cleared")
-                            num_actual_nodes = len([node for node in matched_nodes if node.cls_name not in NodeType.MULTI_ORIGIN])
-                            self.wait_level_cleared(num_actual_nodes)
-                            break
-
-                        # TODO urgent, waiting, update_guess etc should follow similar pattern to aware
-                        #  cos rn naive fast on low bloodpoints when selecting one by one (ie on low bp) will be
-                        #  waiting for way too long before taking a screenshot causing unnecessary delay when it should
-                        #  instead be taking a screenshot instantly, doing update guess, then doing the wait at the end
-                        #  so just follow what aware is doing
-
-                        update_iteration += 1
-                bloodweb_iteration += 1
-            else:
-                edge_detector = EdgeDetection()
-                while True:
-                    if self.prestige_limit is not None and self.prestige_total == self.prestige_limit:
-                        print("reached prestige limit. terminating")
-                        self.emit("terminate")
-                        self.emit("toggle_text", ("Prestige limit reached.", False, False))
-                        return
-
-                    # screen capture
-                    print("capturing screen")
-                    cv_img = CVImage.screen_capture()
-                    image_gray = cv_img.get_gray()
-                    debugger.set_image(bloodweb_iteration, cv_img)
-
-                    # yolov8: detect and match all nodes
-                    print("yolov8: detect and match all nodes")
-                    node_results = node_detector.predict(cv_img.get_bgr())
-                    all_nodes, bp_node = node_detector.get_validate_all_nodes(node_results)
-                    matched_nodes = node_detector.match_nodes(all_nodes, image_gray, merged_base)
-                    debugger.set_nodes(bloodweb_iteration, matched_nodes)
-
-                    # nothing detected
-                    if len(matched_nodes) == 0 or \
-                            (len(matched_nodes) == 1 and matched_nodes[0].cls_name in NodeType.MULTI_ORIGIN):
-                        print("nothing detected, trying again...")
-                        if debug_mode:
-                            debugger.construct_and_show_images(bloodweb_iteration)
-                        time.sleep(StateProcess.RETRY_TIME) # try again
-                        self.click()
+                        centre = origin_auto_enabled[0].box.centre()
+                        self.move_to(*centre.xy())
+                        self.click_origin(num_unclaimed)
+                        bloodweb_iteration += 1
                         continue
+                elif any([node.cls_name == NodeType.ORIGIN_AUTO_DISABLED for node in matched_nodes]):
+                    # disabled auto origin found
+                    print("bloodpoints depleted. terminating")
+                    self.emit("terminate")
+                    self.emit("toggle_text", ("Bloodpoints depleted.", False, False))
+                    return
 
-                    # current_bp_balance = node_detector.calculate_bloodpoints(bp_node, image_gray)
-                    # if bloodweb_iteration == 0:
-                    #     initial_bp_balance = current_bp_balance
+                # yolov5obb: detect and link all edges
+                print("yolov5obb: detect and link all edges")
+                edge_results = edge_detector.predict(cv_img.get_bgr())
+                avg_diameter = mean([(m.box.diameter()) for m in matched_nodes])
+                linked_edges = edge_detector.link_edges(edge_results, matched_nodes, avg_diameter)
+                debugger.set_edges(bloodweb_iteration, linked_edges)
+
+                # create networkx graph of nodes
+                print("creating networkx graph")
+                grapher = Grapher(matched_nodes, linked_edges) # all 9999
+                base_bloodweb = grapher.create()
+                debugger.set_base_bloodweb(bloodweb_iteration, base_bloodweb)
+
+                print("NODES")
+                print(TextUtil.justify(4, [[node_id, data["name"], data["cls_name"]]
+                                           for node_id, data in base_bloodweb.nodes.items()]))
+                print("EDGES")
+                print(TextUtil.justify(4, [[edge[0], base_bloodweb.nodes[edge[0]]["name"], edge[1],
+                                            base_bloodweb.nodes[edge[1]]["name"]] for edge in base_bloodweb.edges]))
+
+                if debug_mode:
+                    debugger.construct_and_show_images(bloodweb_iteration)
+
+                update_iteration = 0
+                dijkstra_graphs = []
+                while True:
+                    # run through optimiser
+                    print("optimiser")
+                    optimiser = Optimiser(base_bloodweb)
+                    optimiser.run(profile_id, bundled)
+                    debugger.set_dijkstra(bloodweb_iteration, update_iteration, optimiser.dijkstra_graph)
+                    dijkstra_graphs.append(optimiser.dijkstra_graph)
+                    objs = []
+                    if update_iteration == 0: # initial dijkstra
+                        print("    initial nodes")
+                        for node_id, data in optimiser.dijkstra_graph.nodes.items():
+                            objs.append([node_id, data["name"], data["value"], data["cls_name"]])
+                    else: # updated dijkstra: any changes are shown from previous => current
+                        print("    updated nodes")
+                        last_graph = dijkstra_graphs[-2].nodes
+                        for node_id, data in optimiser.dijkstra_graph.nodes.items():
+                            last_data = last_graph[node_id]
+                            value_changed = last_data["value"] != data["value"]
+                            cls_name_changed = last_data["cls_name"] != data["cls_name"]
+                            if value_changed or cls_name_changed:
+                                objs.append([node_id, data["name"],
+                                             (last_data["value"] if value_changed else ""),
+                                             ("=>" if value_changed else ""),
+                                             data["value"],
+                                             (last_data["cls_name"] if cls_name_changed else ""),
+                                             ("=>" if cls_name_changed else ""),
+                                             data["cls_name"]])
+                    print(TextUtil.justify(8, objs))
+
+                    # auto-purchase from all unlockables same sub/tier OR below threshold (if applicable)
+                    remaining_bloodweb_cost = 0
+                    num_unclaimed = 0
+                    for data in base_bloodweb.nodes.values():
+                        if data["cls_name"] in NodeType.MULTI_UNCLAIMED:
+                            unlockable = [u for u in unlockables if u.unique_id == data["name"]][0]
+                            remaining_bloodweb_cost += Data.get_cost(unlockable.rarity, unlockable.type)
+                            num_unclaimed += 1
+                    if len(origin_auto_enabled) > 0 and \
+                            optimiser.can_auto_purchase(profile_id, bundled, self.threshold_tier,
+                                                        self.threshold_subtier) and \
+                            (self.bp_limit is None or remaining_bloodweb_cost <= self.bp_limit - self.bp_total):
+                        print("auto origin (enabled) from auto purchase: selecting")
+                        self.bp_total += remaining_bloodweb_cost
+                        self.emit("bloodpoint", (self.bp_total, self.bp_limit))
+                        centre = origin_auto_enabled[0].box.centre()
+                        self.move_to(*centre.xy())
+                        self.click_origin(num_unclaimed)
+                        print("level cleared")
+                        break
+
+                    if run_mode == "aware_single":
+                        best_node = optimiser.select_best_single()
+                        if best_node is None:
+                            self.wait_level_cleared()
+                            break
+                        best_nodes = [best_node]
+                        u = [u for u in unlockables if u.unique_id == best_node.name][0]
+                        cost = Data.get_cost(u.rarity, u.type)
+                    else:
+                        best_nodes = optimiser.select_best_multi(unlockables) # TODO incorporate into debugging
+                        if len(best_nodes) == 0:
+                            self.wait_level_cleared()
+                            break
+                        best_node = best_nodes[-1]
+                        us = [[u for u in unlockables if u.unique_id == node.name][0] for node in best_nodes]
+                        cost = sum([Data.get_cost(u.rarity, u.type) for u in us])
+                    if self.bp_limit is not None and self.bp_total + cost > self.bp_limit:
+                        print(f"{best_node.node_id} ({best_node.name}): reached bloodpoint limit. terminating")
+                        self.emit("terminate")
+                        self.emit("toggle_text", ("Bloodpoint limit reached.", False, False))
+                        return
+                    # if cost > current_bp_balance:
+                    #     print(f"{best_node.node_id} ({best_node.name}): bloodpoints depleted. terminating")
+                    #     self.emit("terminate")
+                    #     self.emit("toggle_text", ("Bloodpoints depleted.", False, False))
+                    #     return
+
+                    print(f"{best_node.node_id} ({best_node.name})")
+                    self.bp_total += cost
+                    self.emit("bloodpoint", (self.bp_total, self.bp_limit))
+
+                    # select node: press OR hold on the node for 0.3s
+                    grab_time = time.time()
+                    self.move_to(best_node.x, best_node.y)
+                    self.click_node()
+
+                    # mystery box: click
+                    # if "mysteryBox" in best_node.name:
+                    #     print("mystery box selected")
+                    #     time.sleep(0.9)
+                    #     self.click()
+                    #     time.sleep(0.2)
+
+                    # wait
+                    if speed == "slow" and not ignore_slow:
+                        self.wait(grab_time, len(best_nodes), True)
+
+                    # take new picture and update colours
+                    print("updating bloodweb")
+                    updated_img = CVImage.screen_capture()
+                    debugger.add_updated_image(bloodweb_iteration, update_iteration, updated_img)
+
+                    # TODO potential timewasting here
+                    print("yolov8: detect all nodes")
+                    updated_results = node_detector.predict(updated_img.get_bgr())
+                    updated_nodes, updated_bp_node = node_detector.get_validate_all_nodes(updated_results)
+                    new_level = Grapher.update(base_bloodweb, updated_nodes, best_node)
+                    # current_bp_balance = node_detector.calculate_bloodpoints(updated_bp_node,
+                    #                                                          updated_img.get_gray())
                     # self.bp_total = initial_bp_balance - current_bp_balance
                     # self.emit("bloodpoint", (self.bp_total, self.bp_limit))
-
-                    prestige = [node for node in matched_nodes if node.cls_name == NodeType.PRESTIGE]
-                    origin_auto_enabled = [node for node in matched_nodes
-                                           if node.cls_name == NodeType.ORIGIN_AUTO_ENABLED]
-
-                    # fast-forward levels with <= 6 nodes (excl. origin): autobuy if possible
-                    num_actual_nodes = len([node for node in matched_nodes if node.cls_name not in NodeType.MULTI_ORIGIN])
-                    fast_forward = num_actual_nodes <= 6
-                    ignore_slow = False
-
-                    # prestige
-                    if len(prestige) > 0:
-                        self.prestige_total += 1
-                        if debug_mode:
-                            debugger.construct_and_show_images(bloodweb_iteration)
-                        if self.bp_limit is not None and self.bp_total + 20000 > self.bp_limit:
-                            print("prestige level: reached bloodpoint limit. terminating")
-                            self.emit("terminate")
-                            self.emit("toggle_text", ("Bloodpoint limit reached.", False, False))
-                            return
-                        # if 20000 > current_bp_balance:
-                        #     print("prestige level: bloodpoints depleted. terminating")
-                        #     self.emit("terminate")
-                        #     self.emit("toggle_text", ("Bloodpoints depleted.", False, False))
-                        #     return
-
-                        print("prestige level: selecting")
-                        self.bp_total += 20000
-                        self.emit("prestige", (self.prestige_total, self.prestige_limit))
-                        self.emit("bloodpoint", (self.bp_total, self.bp_limit))
-                        centre = matched_nodes[0].box.centre()
-                        self.move_to(*centre.xy())
-                        self.click_prestige()
-                        bloodweb_iteration += 1
-                        continue
-                    elif fast_forward and len(origin_auto_enabled) > 0:
-                        # enabled auto origin found
-                        total_bloodweb_cost = 0
-                        num_unclaimed = 0
-                        for node in matched_nodes:
-                            if node.cls_name in NodeType.MULTI_UNCLAIMED:
-                                unlockable = [u for u in unlockables if u.unique_id == node.unique_id][0]
-                                total_bloodweb_cost += Data.get_cost(unlockable.rarity, unlockable.type)
-                                num_unclaimed += 1
-                        if debug_mode:
-                            debugger.construct_and_show_images(bloodweb_iteration)
-
-                        if self.bp_limit is not None and total_bloodweb_cost > self.bp_limit - self.bp_total:
-                            # manual: start edge detection and optimal non-auto selection but without waiting
-                            ignore_slow = True # dont need to wait the extra time that slow necessitates
-                        else:
-                            print("auto origin (enabled) from fast forward: selecting")
-                            self.bp_total += total_bloodweb_cost
-                            self.emit("bloodpoint", (self.bp_total, self.bp_limit))
-                            centre = origin_auto_enabled[0].box.centre()
-                            self.move_to(*centre.xy())
-                            self.click_origin(num_unclaimed)
-                            bloodweb_iteration += 1
-                            continue
-                    elif any([node.cls_name == NodeType.ORIGIN_AUTO_DISABLED for node in matched_nodes]):
+                    if any([node.cls_name == NodeType.ORIGIN_AUTO_DISABLED for node in updated_nodes]):
                         # disabled auto origin found
                         print("bloodpoints depleted. terminating")
                         self.emit("terminate")
                         self.emit("toggle_text", ("Bloodpoints depleted.", False, False))
                         return
 
-                    # yolov5obb: detect and link all edges
-                    print("yolov5obb: detect and link all edges")
-                    edge_results = edge_detector.predict(cv_img.get_bgr())
-                    avg_diameter = mean([(m.box.diameter()) for m in matched_nodes])
-                    linked_edges = edge_detector.link_edges(edge_results, matched_nodes, avg_diameter)
-                    debugger.set_edges(bloodweb_iteration, linked_edges)
+                    # new level
+                    if new_level:
+                        print("level cleared")
+                        self.wait_level_cleared()
+                        # TODO this skips the "updated nodes" print (this and 5 lines above are the only places after clicking / updating bloodweb where theres an early break)
+                        break
 
-                    # create networkx graph of nodes
-                    print("creating networkx graph")
-                    grapher = Grapher(matched_nodes, linked_edges) # all 9999
-                    base_bloodweb = grapher.create()
-                    debugger.set_base_bloodweb(bloodweb_iteration, base_bloodweb)
+                    # wait when aware fast: we do it after the screenshot+update because we wont have to wait as long
+                    if speed == "fast" or ignore_slow:
+                        # assume all the ones that were attempted to be taken WERE taken, so we dont try click the same one again
+                        Grapher.update_guess(base_bloodweb, best_nodes)
+                        # bug (https://discord.com/channels/1016471051187802333/1372651576031707308)
+                        # presumably caused by new_level being False bc it thinks theres something accessible
+                        # then update_guess turned it into claimed, which means the only way this could be possible
+                        # is if Grapher.update turned the previously selected node into inaccessible then update_guess turned it into claimed
+                        # i've disabled the lines in update that set status to inaccessible
+                        # the other case is update_guess saying everything is claimed when theres still stuff available, but new_level returned False
+                        # eg 1 2 3, i go for 3, get 1, 3 gets entity stolen, still 2 left at time of screenshot, update_guess thinks ive done 1-3, no unclaimed nodes at time of can_auto_purchase
+                        # which ive patched by just going through to can_auto_purchase returning true if there is nothing on the bloodweb
+                        self.wait(grab_time, len(best_nodes), False)
 
-                    print("NODES")
-                    print(TextUtil.justify(4, [[node_id, data["name"], data["cls_name"]]
-                                               for node_id, data in base_bloodweb.nodes.items()]))
-                    print("EDGES")
-                    print(TextUtil.justify(4, [[edge[0], base_bloodweb.nodes[edge[0]]["name"], edge[1],
-                                                base_bloodweb.nodes[edge[1]]["name"]] for edge in base_bloodweb.edges]))
-
-                    if debug_mode:
-                        debugger.construct_and_show_images(bloodweb_iteration)
-
-                    update_iteration = 0
-                    dijkstra_graphs = []
-                    while True:
-                        # run through optimiser
-                        print("optimiser")
-                        optimiser = Optimiser(base_bloodweb)
-                        optimiser.run(profile_id, bundled)
-                        debugger.set_dijkstra(bloodweb_iteration, update_iteration, optimiser.dijkstra_graph)
-                        dijkstra_graphs.append(optimiser.dijkstra_graph)
-                        objs = []
-                        if update_iteration == 0: # initial dijkstra
-                            print("    initial nodes")
-                            for node_id, data in optimiser.dijkstra_graph.nodes.items():
-                                objs.append([node_id, data["name"], data["value"], data["cls_name"]])
-                        else: # updated dijkstra: any changes are shown from previous => current
-                            print("    updated nodes")
-                            last_graph = dijkstra_graphs[-2].nodes
-                            for node_id, data in optimiser.dijkstra_graph.nodes.items():
-                                last_data = last_graph[node_id]
-                                value_changed = last_data["value"] != data["value"]
-                                cls_name_changed = last_data["cls_name"] != data["cls_name"]
-                                if value_changed or cls_name_changed:
-                                    objs.append([node_id, data["name"],
-                                                 (last_data["value"] if value_changed else ""),
-                                                 ("=>" if value_changed else ""),
-                                                 data["value"],
-                                                 (last_data["cls_name"] if cls_name_changed else ""),
-                                                 ("=>" if cls_name_changed else ""),
-                                                 data["cls_name"]])
-                        print(TextUtil.justify(8, objs))
-
-                        # auto-purchase from all unlockables same sub/tier OR below threshold (if applicable)
-                        remaining_bloodweb_cost = 0
-                        num_unclaimed = 0
-                        for data in base_bloodweb.nodes.values():
-                            if data["cls_name"] in NodeType.MULTI_UNCLAIMED:
-                                unlockable = [u for u in unlockables if u.unique_id == data["name"]][0]
-                                remaining_bloodweb_cost += Data.get_cost(unlockable.rarity, unlockable.type)
-                                num_unclaimed += 1
-                        if len(origin_auto_enabled) > 0 and \
-                                optimiser.can_auto_purchase(profile_id, bundled, self.threshold_tier,
-                                                            self.threshold_subtier) and \
-                                (self.bp_limit is None or remaining_bloodweb_cost <= self.bp_limit - self.bp_total):
-                            print("auto origin (enabled) from auto purchase: selecting")
-                            self.bp_total += remaining_bloodweb_cost
-                            self.emit("bloodpoint", (self.bp_total, self.bp_limit))
-                            centre = origin_auto_enabled[0].box.centre()
-                            self.move_to(*centre.xy())
-                            self.click_origin(num_unclaimed)
-                            print("level cleared")
-                            break
-
-                        if run_mode == "aware_single":
-                            best_node = optimiser.select_best_single()
-                            if best_node is None:
-                                self.wait_level_cleared(num_actual_nodes)
-                                break
-                            best_nodes = [best_node]
-                            u = [u for u in unlockables if u.unique_id == best_node.name][0]
-                            cost = Data.get_cost(u.rarity, u.type)
-                        else:
-                            best_nodes = optimiser.select_best_multi(unlockables) # TODO incorporate into debugging
-                            if len(best_nodes) == 0:
-                                self.wait_level_cleared(num_actual_nodes)
-                                break
-                            best_node = best_nodes[-1]
-                            us = [[u for u in unlockables if u.unique_id == node.name][0] for node in best_nodes]
-                            cost = sum([Data.get_cost(u.rarity, u.type) for u in us])
-                        if self.bp_limit is not None and self.bp_total + cost > self.bp_limit:
-                            print(f"{best_node.node_id} ({best_node.name}): reached bloodpoint limit. terminating")
-                            self.emit("terminate")
-                            self.emit("toggle_text", ("Bloodpoint limit reached.", False, False))
-                            return
-                        # if cost > current_bp_balance:
-                        #     print(f"{best_node.node_id} ({best_node.name}): bloodpoints depleted. terminating")
-                        #     self.emit("terminate")
-                        #     self.emit("toggle_text", ("Bloodpoints depleted.", False, False))
-                        #     return
-
-                        print(f"{best_node.node_id} ({best_node.name})")
-                        self.bp_total += cost
-                        self.emit("bloodpoint", (self.bp_total, self.bp_limit))
-
-                        # select node: press OR hold on the node for 0.3s
-                        grab_time = time.time()
-                        self.move_to(best_node.x, best_node.y)
-                        self.click_node()
-
-                        # mystery box: click
-                        # if "mysteryBox" in best_node.name:
-                        #     print("mystery box selected")
-                        #     time.sleep(0.9)
-                        #     self.click()
-                        #     time.sleep(0.2)
-
-                        # wait
-                        if speed == "slow" and not ignore_slow:
-                            self.wait(grab_time, len(best_nodes), True)
-
-                        # take new picture and update colours
-                        print("updating bloodweb")
-                        updated_img = CVImage.screen_capture()
-                        debugger.add_updated_image(bloodweb_iteration, update_iteration, updated_img)
-
-                        # TODO potential timewasting here
-                        print("yolov8: detect all nodes")
-                        updated_results = node_detector.predict(updated_img.get_bgr())
-                        updated_nodes, updated_bp_node = node_detector.get_validate_all_nodes(updated_results)
-                        new_level = Grapher.update(base_bloodweb, updated_nodes, best_node)
-                        # current_bp_balance = node_detector.calculate_bloodpoints(updated_bp_node,
-                        #                                                          updated_img.get_gray())
-                        # self.bp_total = initial_bp_balance - current_bp_balance
-                        # self.emit("bloodpoint", (self.bp_total, self.bp_limit))
-                        if any([node.cls_name == NodeType.ORIGIN_AUTO_DISABLED for node in updated_nodes]):
-                            # disabled auto origin found
-                            print("bloodpoints depleted. terminating")
-                            self.emit("terminate")
-                            self.emit("toggle_text", ("Bloodpoints depleted.", False, False))
-                            return
-
-                        # new level
-                        if new_level:
-                            print("level cleared")
-                            self.wait_level_cleared(num_actual_nodes)
-                            # TODO this skips the "updated nodes" print (this and 5 lines above are the only places after clicking / updating bloodweb where theres an early break)
-                            break
-
-                        # wait when aware fast: we do it after the screenshot+update because we wont have to wait as long
-                        if speed == "fast" or ignore_slow:
-                            # assume all the ones that were attempted to be taken WERE taken, so we dont try click the same one again
-                            Grapher.update_guess(base_bloodweb, best_nodes)
-                            # bug (https://discord.com/channels/1016471051187802333/1372651576031707308)
-                            # presumably caused by new_level being False bc it thinks theres something accessible
-                            # then update_guess turned it into claimed, which means the only way this could be possible
-                            # is if Grapher.update turned the previously selected node into inaccessible then update_guess turned it into claimed
-                            # i've disabled the lines in update that set status to inaccessible
-                            # the other case is update_guess saying everything is claimed when theres still stuff available, but new_level returned False
-                            # eg 1 2 3, i go for 3, get 1, 3 gets entity stolen, still 2 left at time of screenshot, update_guess thinks ive done 1-3, no unclaimed nodes at time of can_auto_purchase
-                            # which ive patched by just going through to can_auto_purchase returning true if there is nothing on the bloodweb
-                            self.wait(grab_time, len(best_nodes), False)
-
-                        update_iteration += 1
-                    bloodweb_iteration += 1
+                    update_iteration += 1
+                bloodweb_iteration += 1
         except:
             traceback.print_exc()
             self.emit("terminate")
@@ -813,7 +592,7 @@ class StateProcess(Process):
                                       True, False))
 
 class State:
-    version = "v1.2.16"
+    version = "v1.2.17"
     pyautogui.FAILSAFE = False
     pyautogui.PAUSE = 0.05
     # pydirectinput.FAILSAFE = False
