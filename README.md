@@ -7,7 +7,7 @@
 A program to automatically level the Bloodweb in the game Dead by Daylight.
 
 ## Developer Notes
-Assets for icon recognition are up-to-date as of Dead by Daylight Patch 8.7.0 (CHAPTER 35.5: Steady Pulse).\
+Assets for icon recognition are up-to-date as of Dead by Daylight Patch 9.0.0 (CHAPTER 36: Five Nights at Freddy's).\
 To contact me about this project, or if you have any inquiries, please join the [Discord](https://discord.gg/J4KCqJJuaM).
 Any bug reports, requests for technical support, or suggestions can be submitted either through this server or
 [GitHub issues](https://github.com/IIInitiationnn/BloodEmporium/issues).\
@@ -30,11 +30,9 @@ A [video guide](https://www.youtube.com/watch?v=3GFwQaB06Ug) is available for a 
 
 ## Features
 - Allows user to configure which unlockables are preferred or undesirable.
-- Three modes:
-    - naive: select randomly
-    - aware: select according to preference
-        - single-claim: select one at a time
-        - multi-claim: can select multiple along a path at once to save time
+- Two modes:
+    - single-claim: select one at a time
+    - multi-claim: can select multiple along a path at once to save time
 - Two speeds: slow (accurate) and fast.
 - Bloodpoint spend limit / prestige level limit.
 - Automatic termination upon bloodpoint depletion.
